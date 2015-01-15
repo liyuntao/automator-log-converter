@@ -17,124 +17,150 @@
  */
 package de.preusslerpark.android.tools;
 
-import java.io.BufferedReader;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.StringReader;
-import java.util.Map;
-
 import com.android.ddmlib.testrunner.ITestRunListener;
 import com.android.ddmlib.testrunner.InstrumentationResultParser;
 import com.android.ddmlib.testrunner.TestIdentifier;
 
+import java.io.*;
+import java.util.Map;
+
 public class Converter {
 
-    private final String testSuiteName;
-    private final String outPath;
+    private final String mTestSuiteName;
+    private final String mOutPath;
 
-    public static Converter createConverForFile(String testSuiteName, String outPath) {
-        return new Converter(testSuiteName, outPath, true);
-    }
-    
-    public static Converter createConverForPath(String testSuiteName, String outPath) {
-        return new Converter(testSuiteName, outPath, false);
+    private Converter(String testSuiteName, String outPath) {
+        this.mTestSuiteName = testSuiteName;
+        this.mOutPath = new File(outPath, testSuiteName + ".xml").toString();
     }
 
-    private Converter(String testSuiteName, String outPath, boolean isFilename) {
-        this.testSuiteName = testSuiteName;
-        this.outPath = isFilename ? outPath : outPath + testSuiteName + ".xml";
+    public static Converter createConverterForPath(String testSuiteName, String outPath) {
+        return new Converter(testSuiteName, outPath);
     }
 
-    public void convert(String streamToRead) throws FileNotFoundException, IOException {
-        FileOutputStream currentFile = new FileOutputStream(outPath);
+    public void convert(String streamToRead) throws IOException {
+        FileOutputStream currentFile = new FileOutputStream(mOutPath);
         final XMLResultFormatter outputter = new XMLResultFormatter();
-        InstrumentationResultParser parser = createParser(testSuiteName, outputter);
+        InstrumentationResultParser parser = createParser(mTestSuiteName, outputter);
         outputter.setOutput(currentFile);
-        outputter.startTestSuite(testSuiteName);
+        outputter.startTestSuite();
 
-        String[] lines = streamToRead.split("\n");;
+        String[] lines = streamToRead.split("\n");
         parser.processNewLines(lines);
         parser.done();
-        outputter.endTestSuite(testSuiteName, 0);
         currentFile.close();
     }
 
-    private InstrumentationResultParser createParser(String testSuite, final XMLResultFormatter outputter) {
-
+    private InstrumentationResultParser createParser(final String testSuite, final XMLResultFormatter outputter) {
+        /**
+         * Receives event notifications during instrumentation test runs.
+         * Patterned after junit.runner.TestRunListener.
+         *
+         * The sequence of calls will be:
+         * <ul>
+         *     <li> testRunStarted </li>
+         *     <li> testStarted </li>
+         *     <li> [testFailed] </li>
+         *     <li> testEnded </li>
+         *     <li> ... </li>
+         *     <li> [testRunFailed] </li>
+         *     <li> testRunEnded </li>
+         * </ul>
+         */
 
         ITestRunListener listener = new ITestRunListener() {
-
+            /**
+             * Reports the start of a test run.
+             *
+             * @param runName the test run name
+             * @param testCount total number of tests in test run
+             */
             @Override
-            public void testEnded(TestIdentifier test, Map<String, String> arg1) {
-                System.out.println("testEnded " + test);
-                outputter.endTest(test);
+            public void testRunStarted(String runName, int testCount) {
+                System.out.println("test suite started " + runName + ", testCount: " + testCount);
             }
 
+            /**
+             * Reports the start of an individual test case.
+             *
+             * @param testIdentifier identifies the test
+             */
             @Override
-            public void testFailed(TestFailure arg0, TestIdentifier test, String arg2) {
-                System.out.println("testFailed " + arg0 + "/" + arg2);
+            public void testStarted(TestIdentifier testIdentifier) {
+                System.out.println("testStarted " + testIdentifier.toString());
+            }
 
-                BufferedReader reader = new BufferedReader(new StringReader(arg2));
+            /**
+             * Reports the failure of an individual test case.
+             *
+             * @param testIdentifier identifies the test
+             * @param s stack trace of failure
+             */
+            @Override
+            public void testFailed(TestIdentifier testIdentifier, String s) {
+                System.out.println("testFailed " + s);
+                BufferedReader reader = new BufferedReader(new StringReader(s));
                 try {
                     String error = reader.readLine();
                     String[] errorSeperated = error.split(":", 2);
-                    outputter.addFailure(test, errorSeperated.length > 1 ? errorSeperated[1].trim() : "Failed", errorSeperated[0].trim(), arg2.substring(error.length()));
+                    outputter.addFailure(testIdentifier, errorSeperated.length > 1 ?
+                            errorSeperated[1].trim() : "Failed", errorSeperated[0].trim(), s.substring(error.length()));
                 } catch (IOException e) {
                     e.printStackTrace();
-                    outputter.addFailure(test, e);
+                    outputter.addFailure(testIdentifier, e);
                 }
-
             }
 
             @Override
-            public void testRunEnded(long elapsedTime, Map<String, String> arg1) {
-                // System.out.println("testRunEnded " + elapsedTime + "/" + arg1);
-                // outputter.endTestSuite(currentSuite, elapsedTime);
-
+            public void testAssumptionFailure(TestIdentifier testIdentifier, String s) {
+                System.out.println("assumption Failed " + s);
             }
 
             @Override
-            public void testRunFailed(String name) {
-                System.out.println("testRunFailed " + name);
-                // outputter.endTestSuite(name, 0);
+            public void testIgnored(TestIdentifier testIdentifier) {}
 
+            /**
+             * Reports the execution end of an individual test case.
+             * @param testIdentifier identifies the test
+             * @param map a {@link Map} of the metrics emitted
+             */
+            @Override
+            public void testEnded(TestIdentifier testIdentifier, Map<String, String> map) {
+                System.out.println("testEnded " + testIdentifier);
+                outputter.endTest(testIdentifier);
             }
 
+            /**
+             * Reports test run failed to complete due to a fatal error.
+             *
+             * @param s describing reason for run failure.
+             */
             @Override
-            public void testRunStarted(String name, int arg1) {
-                // System.out.println("testRunStarted " + name + "/" + arg1);
-                // if (name.equals(currentSuite)) {
-                // name = name + "1";
-                // }
-                // currentSuite = name;
-                // try {
-                // if (currentFile != null) {
-                // currentFile.close();
-                // }
-                // currentFile = new FileOutputStream(outPath + currentSuite + ".xml");
-                // }
-                // catch (IOException e) {
-                // }
-                //
-                // outputter.setOutput(currentFile);
-                // outputter.startTestSuite(currentSuite);
+            public void testRunFailed(String s) {
+                System.out.println("testRunFailed " + s);
             }
 
+            /**
+             * Reports test run stopped before completion due to a user request.
+             *
+             * TODO: currently unused, consider removing
+             * @param l device reported elapsed time, in milliseconds
+             */
             @Override
-            public void testRunStopped(long elapsedTime) {
-                // outputter.endTestSuite(currentSuite, elapsedTime);
-            }
+            public void testRunStopped(long l) {}
 
+            /**
+             * Reports end of test run.
+             *
+             * @param l device reported elapsed time, in milliseconds
+             * @param map key-value pairs reported at the end of a test run
+             */
             @Override
-            public void testStarted(final TestIdentifier test) {
-                System.out.println("testStarted " + test.toString());
-                outputter.startTest(test);
-
-
+            public void testRunEnded(long l, Map<String, String> map) {
+                System.out.println("testRunEnded " + l);
+                outputter.endTestSuite(l);
             }
         };
         return new InstrumentationResultParser(testSuite, listener);
     }
-
 }
