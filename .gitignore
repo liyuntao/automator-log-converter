@@ -1,1 +1,15 @@
+### Gradle ###
+.gradle/
+build/
+classes/
+
+### IntelliJ ###
+*.iml
+*.ipr
+*.iws
+.idea/
+out/
+
+
+### Other ###
 bin
